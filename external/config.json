@@ -1,8 +1,8 @@
 {
-    "version": "v3-deps-172",
-    "zip_file_size": "141133955",
+    "version": "hc-v3-deps-172/cocos2d-x-hc-3rd-party-libs-bin-hc3-deps-172",
+    "zip_file_size": "265351034",
     "repo_name": "cocos2d-x-3rd-party-libs-bin",
-    "repo_parent": "https://github.com/cocos2d/",
+    "repo_parent": "https://github.com/hashcube/",
     "move_dirs": {
         "fbx-conv": "tools"
     }

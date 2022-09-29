@@ -92,7 +92,7 @@ class CocosZipInstaller(object):
             self._move_dirs = None
         self._filename = self._current_version + '.zip'
         self._url = data["repo_parent"] + \
-            self._repo_name + '/archive/' + self._filename
+            self._repo_name + '/releases/download/' + self._filename
         self._zip_file_size = int(data["zip_file_size"])
         # 'v' letter was swallowed by github, so we need to substring it from the 2nd letter
         if self._current_version[0] == 'v':
