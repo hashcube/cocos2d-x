@@ -77,6 +77,7 @@ public abstract class Cocos2dxActivity extends AppCompatActivity implements Coco
     private boolean showVirtualButton = false;
     private boolean gainAudioFocus = false;
     private boolean paused = true;
+    private boolean rendererPaused = true;
 
     public Cocos2dxGLSurfaceView getGLSurfaceView(){
         return  mGLSurfaceView;
@@ -211,7 +212,11 @@ public abstract class Cocos2dxActivity extends AppCompatActivity implements Coco
         if(hasFocus && readyToPlay) {
             this.hideVirtualButton();
         	Cocos2dxHelper.onResume();
-        	mGLSurfaceView.onResume();
+            if (rendererPaused) {
+                mGLSurfaceView.onResume();
+                rendererPaused = false;
+            }
+            mGLSurfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
         }
     }
 
@@ -223,6 +228,13 @@ public abstract class Cocos2dxActivity extends AppCompatActivity implements Coco
         if(gainAudioFocus)
             Cocos2dxAudioFocusManager.unregisterAudioFocusListener(this);
         Cocos2dxHelper.onPause();
+        mGLSurfaceView.setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        rendererPaused = true;
         mGLSurfaceView.onPause();
     }
     
