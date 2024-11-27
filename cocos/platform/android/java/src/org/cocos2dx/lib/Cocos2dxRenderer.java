@@ -47,6 +47,7 @@ public class Cocos2dxRenderer implements GLSurfaceView.Renderer {
     private int mScreenWidth;
     private int mScreenHeight;
     private boolean mNativeInitCompleted = false;
+    private boolean mIsPaused = false;
 
     // ===========================================================
     // Constructors
@@ -159,11 +160,15 @@ public class Cocos2dxRenderer implements GLSurfaceView.Renderer {
 
         Cocos2dxHelper.onEnterBackground();
         Cocos2dxRenderer.nativeOnPause();
+        mIsPaused = true;
     }
 
     public void handleOnResume() {
-        Cocos2dxHelper.onEnterForeground();
-        Cocos2dxRenderer.nativeOnResume();
+        if (mIsPaused) {
+            Cocos2dxHelper.onEnterForeground();
+            Cocos2dxRenderer.nativeOnResume();
+            mIsPaused = false;
+        }
     }
 
     private static native void nativeInsertText(final String text);
