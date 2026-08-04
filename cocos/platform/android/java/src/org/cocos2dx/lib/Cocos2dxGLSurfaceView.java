@@ -29,6 +29,7 @@ import android.content.Context;
 import android.opengl.GLSurfaceView;
 import android.os.Handler;
 import android.os.Message;
+import android.os.SystemClock;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -61,6 +62,32 @@ public class Cocos2dxGLSurfaceView extends GLSurfaceView {
 
     private boolean mSoftKeyboardShown = false;
     private boolean mMultipleTouchEnabled = true;
+
+    // On some API 33+ builds a single logical back-press (even a raw
+    // KEYCODE_BACK KeyEvent injected via input/hardware/3-button-nav, not just
+    // a predictive-back gesture) gets delivered through BOTH the legacy
+    // View.onKeyDown/onKeyUp(KEYCODE_BACK) path below AND
+    // Cocos2dxActivity's OnBackInvokedCallback (handleBackInvoked()) —
+    // observed via logcat on a Pixel_6a_API_36 (predictive-back) emulator:
+    // legacy onKeyDown fires, then onBackInvoked() fires ~76ms later, then
+    // legacy onKeyUp fires — all for the same single back press. Without a
+    // guard this double-dispatches KEY_ESCAPE to native code (down,up,down,up),
+    // which opens then immediately closes the game's exit-confirm dialog,
+    // making back appear to do nothing. mLastBackKeyClaimAtMs +
+    // mLegacyBackKeyDownAccepted make the two paths mutually exclusive: only
+    // whichever fires first for a given press gets to dispatch to native code.
+    private long mLastBackKeyClaimAtMs = -1;
+    private boolean mLegacyBackKeyDownAccepted = false;
+    private static final long BACK_KEY_DUPLICATE_WINDOW_MS = 800;
+
+    private boolean claimBackKeyDispatch() {
+        final long now = SystemClock.uptimeMillis();
+        if (mLastBackKeyClaimAtMs >= 0 && (now - mLastBackKeyClaimAtMs) < BACK_KEY_DUPLICATE_WINDOW_MS) {
+            return false;
+        }
+        mLastBackKeyClaimAtMs = now;
+        return true;
+    }
 
     public boolean isSoftKeyboardShown() {
         return mSoftKeyboardShown;
@@ -365,6 +392,12 @@ public class Cocos2dxGLSurfaceView extends GLSurfaceView {
     public boolean onKeyDown(final int pKeyCode, final KeyEvent pKeyEvent) {
         switch (pKeyCode) {
             case KeyEvent.KEYCODE_BACK:
+                mLegacyBackKeyDownAccepted = claimBackKeyDispatch();
+                if (!mLegacyBackKeyDownAccepted) {
+                    // Duplicate delivery of a back press already being handled via
+                    // the OnBackInvokedCallback path (see claimBackKeyDispatch doc).
+                    return true;
+                }
                 Cocos2dxVideoHelper.mVideoHandler.sendEmptyMessage(Cocos2dxVideoHelper.KeyEventBack);
             case KeyEvent.KEYCODE_MENU:
             case KeyEvent.KEYCODE_DPAD_LEFT:
@@ -386,10 +419,47 @@ public class Cocos2dxGLSurfaceView extends GLSurfaceView {
         }
     }
 
+    /**
+     * Drives the same native key-event flow as onKeyDown(KEYCODE_BACK)/onKeyUp(KEYCODE_BACK)
+     * below, but callable directly (not from a KeyEvent). Used by Cocos2dxActivity's
+     * OnBackInvokedCallback (API 33+) so games whose exit-confirm/back handling lives in
+     * native code via EventListenerKeyboard::onKeyReleased(KEY_ESCAPE) keep working unchanged
+     * when Android routes back navigation through the predictive-back dispatcher instead of
+     * the legacy onKeyDown(KEYCODE_BACK) path. Synthesizes both the down and up events since
+     * the native side's key press/release pairing depends on both.
+     */
+    public void handleBackInvoked() {
+        if (!claimBackKeyDispatch()) {
+            // Duplicate delivery of a back press already being handled via the
+            // legacy onKeyDown/onKeyUp(KEYCODE_BACK) path (see claimBackKeyDispatch doc).
+            return;
+        }
+        Cocos2dxVideoHelper.mVideoHandler.sendEmptyMessage(Cocos2dxVideoHelper.KeyEventBack);
+        this.queueEvent(new Runnable() {
+            @Override
+            public void run() {
+                Cocos2dxGLSurfaceView.this.mCocos2dxRenderer.handleKeyDown(KeyEvent.KEYCODE_BACK);
+            }
+        });
+        this.queueEvent(new Runnable() {
+            @Override
+            public void run() {
+                Cocos2dxGLSurfaceView.this.mCocos2dxRenderer.handleKeyUp(KeyEvent.KEYCODE_BACK);
+            }
+        });
+    }
+
     @Override
     public boolean onKeyUp(final int keyCode, KeyEvent event) {
         switch (keyCode) {
             case KeyEvent.KEYCODE_BACK:
+                if (!mLegacyBackKeyDownAccepted) {
+                    // The matching onKeyDown for this BACK press was rejected as a
+                    // duplicate (see claimBackKeyDispatch doc) — skip the up too so
+                    // native code never sees a lone/duplicate release event.
+                    return true;
+                }
+                mLegacyBackKeyDownAccepted = false;
             case KeyEvent.KEYCODE_MENU:
             case KeyEvent.KEYCODE_DPAD_LEFT:
             case KeyEvent.KEYCODE_DPAD_RIGHT:
