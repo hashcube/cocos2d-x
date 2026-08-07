@@ -43,6 +43,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 
 
 import com.getkeepsafe.relinker.ReLinker;
@@ -78,6 +80,18 @@ public abstract class Cocos2dxActivity extends AppCompatActivity implements Coco
     private boolean gainAudioFocus = false;
     private boolean paused = true;
     private boolean rendererPaused = true;
+
+    // API 33+ (Build.VERSION_CODES.TIRAMISU): the predictive-back dispatcher is authoritative
+    // once a callback is registered on it (and, on devices/targetSdk combinations where the
+    // system defaults android:enableOnBackInvokedCallback to true, even without registering
+    // one explicitly the legacy onKeyDown(KEYCODE_BACK) path is bypassed and back falls through
+    // to the default "finish activity" behavior). Registering this callback keeps back
+    // navigation routed into the same native key-event flow
+    // (Cocos2dxGLSurfaceView.handleBackInvoked() -> mCocos2dxRenderer.handleKeyDown/Up ->
+    // EventListenerKeyboard::onKeyReleased(KEY_ESCAPE)) that games' exit-confirm dialogs rely on.
+    // On pre-33 devices this is never registered and the existing onKeyDown(KEYCODE_BACK) path
+    // in Cocos2dxGLSurfaceView continues to run unchanged.
+    private OnBackInvokedCallback mOnBackInvokedCallback = null;
 
     public Cocos2dxGLSurfaceView getGLSurfaceView(){
         return  mGLSurfaceView;
@@ -153,6 +167,8 @@ public abstract class Cocos2dxActivity extends AppCompatActivity implements Coco
         
         this.mGLContextAttrs = getGLContextAttrs();
         this.init();
+
+        this.registerBackInvokedCallback();
 
         if (mVideoHelper == null) {
             mVideoHelper = new Cocos2dxVideoHelper(this, mFrameLayout);
@@ -242,9 +258,42 @@ public abstract class Cocos2dxActivity extends AppCompatActivity implements Coco
     protected void onDestroy() {
         if(gainAudioFocus)
             Cocos2dxAudioFocusManager.unregisterAudioFocusListener(this);
+        this.unregisterBackInvokedCallback();
         super.onDestroy();
         if (mGLSurfaceView != null) {
             Cocos2dxHelper.terminateProcess();
+        }
+    }
+
+    /**
+     * Registers a real OnBackInvokedCallback on API 33+ so that back navigation keeps
+     * flowing through the same native key-event path (Cocos2dxRenderer.handleKeyDown/Up
+     * for KEYCODE_BACK -> EventListenerKeyboard::onKeyReleased(KEY_ESCAPE)) that the game's
+     * exit-confirm dialog and other back-button logic already depend on, instead of falling
+     * through to the platform's default "finish activity" behavior when the predictive-back
+     * dispatcher finds no registered callback. No-op on pre-33 devices, where the legacy
+     * View.onKeyDown(KEYCODE_BACK) path in Cocos2dxGLSurfaceView keeps working as-is.
+     */
+    private void registerBackInvokedCallback() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            mOnBackInvokedCallback = new OnBackInvokedCallback() {
+                @Override
+                public void onBackInvoked() {
+                    if (mGLSurfaceView != null) {
+                        mGLSurfaceView.handleBackInvoked();
+                    }
+                }
+            };
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                    mOnBackInvokedCallback);
+        }
+    }
+
+    private void unregisterBackInvokedCallback() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && mOnBackInvokedCallback != null) {
+            getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(mOnBackInvokedCallback);
+            mOnBackInvokedCallback = null;
         }
     }
 
